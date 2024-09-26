@@ -4505,6 +4505,19 @@ int intel_plane_tf_pipeline_init(struct drm_plane *plane, struct drm_prop_enum_l
 		return ret;
 
 	drm_colorop_set_next_property(prev_op, &colorop->base);
+
+	prev_op = &colorop->base;
+
+	colorop = intel_plane_colorop_create(CB_PLANE_3DLUT);
+
+	ret = drm_colorop_3dlut_init(dev, &colorop->base, plane, 17,
+			DRM_COLOROP_LUT3D_INTERPOLATION_TETRAHEDRAL,
+			true);
+	if (ret)
+		return ret;
+
+	drm_colorop_set_next_property(prev_op, &colorop->base);
+
 	prev_op = &colorop->base;
 
 	colorop = intel_plane_colorop_create(CB_PLANE_POST_CSC_LUT);
