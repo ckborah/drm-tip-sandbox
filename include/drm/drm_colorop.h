@@ -142,6 +142,12 @@ struct drm_colorop_state {
 	uint64_t multiplier;
 
 	/**
+	 * @hw_caps:
+	 *
+	 */
+	struct drm_property_blob *hw_caps;
+
+	/**
 	 * @data:
 	 *
 	 * Data blob for any TYPE that requires such a blob. The
@@ -300,6 +306,13 @@ struct drm_colorop {
 	 * Sub-type for DRM_COLOROP_1D_CURVE type.
 	 */
 	struct drm_property *curve_1d_type_property;
+
+	/**
+	 * @hwlut_caps_property:
+	 *
+	 * Property to expose hardware lut capbilities.
+	 */
+	struct drm_property *hw_caps_property;
 
 	/**
 	 * @multiplier_property:
