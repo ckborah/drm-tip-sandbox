@@ -200,8 +200,7 @@ int amdgpu_dm_initialize_default_pipeline(struct drm_plane *plane, struct drm_pr
 	return 0;
 
 cleanup:
-	for (; i >= 0; i--)
-		kfree(ops[i]);
+	drm_colorop_pipeline_destroy(plane);
 
 	return ret;
 }
