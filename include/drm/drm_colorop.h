@@ -146,6 +146,24 @@ struct drm_colorop_state {
 	 *
 	 * Data blob for any TYPE that requires such a blob. The
 	 * interpretation of the blob is TYPE-specific.
+	 *
+	 * For 1D LUTs (DRM_COLOROP_1D_LUT), the blob is an array of
+	 * struct drm_color_lut with size of "lut_size".
+	 *
+	 * For 3x4 matrix (DRM_COLOROP_CTM_3X4), the blob is a float[12]:
+	 * out   matrix          in
+	 * |R|   |0  1  2  3 |   | R |
+	 * |G| = |4  5  6  7 | x | G |
+	 * |B|   |8  9  10 12|   | B |
+	 *
+	 * For 3D LUTs (DRM_COLOROP_3D_LUT), the blob is a 3D array of
+	 * struct drm_color_lut with dimension length of "lut_size".
+	 * The LUT elements are traversed like so:
+	 *   for R in range 0..n
+	 *     for G in range 0..n
+	 *       for B in range 0..n
+	 *         color = lut3d[R][G][B]
+	 *
 	 */
 	struct drm_property_blob *data;
 
