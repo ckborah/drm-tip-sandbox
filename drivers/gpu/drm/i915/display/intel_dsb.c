@@ -570,8 +570,8 @@ void intel_dsb_gosub(struct intel_dsb *dsb,
 
 	intel_dsb_gosub_align(dsb);
 
-	head_tail = ((u64)intel_dsb_head(sub_dsb) << DSB_GOSUB_HEAD_SHIFT) |
-		((u64)intel_dsb_tail(sub_dsb) << DSB_GOSUB_TAIL_SHIFT);
+	head_tail = ((u64)(intel_dsb_head(sub_dsb) >> 6) << DSB_GOSUB_HEAD_SHIFT) |
+		((u64)(intel_dsb_tail(sub_dsb) >> 6) << DSB_GOSUB_TAIL_SHIFT);
 
 	intel_dsb_emit(dsb, lower_32_bits(head_tail),
 		       (DSB_OPCODE_GOSUB << DSB_OPCODE_SHIFT) |
@@ -582,6 +582,13 @@ void intel_dsb_gosub(struct intel_dsb *dsb,
 	 *  FOLLOWING the GOSUB instruction must be NOPs."
 	 */
 	intel_dsb_align_tail(dsb);
+}
+
+void intel_gosub_dsb_finish(struct intel_dsb *dsb)
+{
+	intel_dsb_align_tail(dsb);
+
+	intel_dsb_buffer_flush_map(&dsb->dsb_buf);
 }
 
 void intel_dsb_finish(struct intel_dsb *dsb)
@@ -779,7 +786,7 @@ static void _intel_dsb_commit(struct intel_dsb *dsb, u32 ctrl,
 
 	intel_de_write_fw(display, DSB_INTERRUPT(pipe, dsb->id),
 			  dsb_error_int_status(display) | DSB_PROG_INT_STATUS |
-			  dsb_error_int_en(display) | DSB_PROG_INT_EN);
+			  dsb_error_int_en(display) | DSB_PROG_INT_EN | DSB_GOSUB_INT_EN);
 
 	intel_de_write_fw(display, DSB_HEAD(pipe, dsb->id),
 			  intel_dsb_head(dsb));
@@ -972,4 +979,7 @@ void intel_dsb_irq_handler(struct intel_display *display,
 	if (errors & DSB_POLL_ERR_INT_STATUS)
 		drm_err(display->drm, "[CRTC:%d:%s] DSB %d poll error\n",
 			crtc->base.base.id, crtc->base.name, dsb_id);
+	if (errors & DSB_GOSUB_INT_STATUS)
+		drm_err(display->drm, "[CRTC:%d:%s] DSB %d gosub int error\n",
+				crtc->base.base.id, crtc->base.name, dsb_id);
 }

@@ -1982,20 +1982,26 @@ void intel_color_prepare_commit(struct intel_atomic_state *state,
 	if (!crtc_state->pre_csc_lut && !crtc_state->post_csc_lut)
 		return;
 
-	crtc_state->dsb_color_vblank = intel_dsb_prepare(state, crtc, INTEL_DSB_1, 1024);
+	if (HAS_DOUBLE_BUFFERED_LUT(display))
+		crtc_state->dsb_color_vblank = intel_dsb_prepare(state, crtc, INTEL_DSB_0, 1024);
+	else
+		crtc_state->dsb_color_vblank = intel_dsb_prepare(state, crtc, INTEL_DSB_1, 1024);
 	if (!crtc_state->dsb_color_vblank)
 		return;
 
 	display->funcs.color->load_luts(crtc_state);
 
-	if (crtc_state->use_dsb) {
+	if (crtc_state->use_dsb && !HAS_DOUBLE_BUFFERED_LUT(display)) {
 		intel_vrr_send_push(crtc_state->dsb_color_vblank, crtc_state);
 		intel_dsb_wait_vblank_delay(state, crtc_state->dsb_color_vblank);
 		intel_vrr_check_push_sent(crtc_state->dsb_color_vblank, crtc_state);
 		intel_dsb_interrupt(crtc_state->dsb_color_vblank);
 	}
 
-	intel_dsb_finish(crtc_state->dsb_color_vblank);
+	if (HAS_DOUBLE_BUFFERED_LUT(display))
+		intel_gosub_dsb_finish(crtc_state->dsb_color_vblank);
+	else
+		intel_dsb_finish(crtc_state->dsb_color_vblank);
 }
 
 void intel_color_cleanup_commit(struct intel_crtc_state *crtc_state)
@@ -2020,8 +2026,12 @@ bool intel_color_uses_dsb(const struct intel_crtc_state *crtc_state)
 static bool intel_can_preload_luts(struct intel_atomic_state *state,
 				   struct intel_crtc *crtc)
 {
+	struct intel_display *display = to_intel_display(state);
 	const struct intel_crtc_state *old_crtc_state =
 		intel_atomic_get_old_crtc_state(state, crtc);
+
+	if (HAS_DOUBLE_BUFFERED_LUT(display))
+		return false;
 
 	return !old_crtc_state->post_csc_lut &&
 		!old_crtc_state->pre_csc_lut;
