@@ -1737,6 +1737,19 @@ static int intel_dp_mode_clock(const struct intel_crtc_state *crtc_state,
 		return adjusted_mode->crtc_clock;
 }
 
+static int intel_dp_mode_max_clock_in_range(const struct drm_connector_state *conn_state, int high, int low)
+{
+	int max = -1;
+	const struct drm_display_mode *fixed_mode;
+	struct intel_connector *connector = to_intel_connector(conn_state->connector);
+
+	list_for_each_entry(fixed_mode, &connector->panel.fixed_modes, head) {
+		if (low <= fixed_mode->clock && fixed_mode->clock <= high)
+			max = max(max, fixed_mode->clock);
+	}
+	return max;
+}
+
 /* Optimize link config in order: max bpp, min clock, min lanes */
 static int
 intel_dp_compute_link_config_wide(struct intel_dp *intel_dp,
@@ -1746,39 +1759,48 @@ intel_dp_compute_link_config_wide(struct intel_dp *intel_dp,
 {
 	int bpp, i, lane_count, clock = intel_dp_mode_clock(pipe_config, conn_state);
 	int mode_rate, link_rate, link_avail;
+	struct intel_connector *connector = to_intel_connector(conn_state->connector);
+	const struct drm_display_mode *adjusted_mode = &pipe_config->hw.adjusted_mode;
+	struct intel_display *display = to_intel_display(pipe_config);
 
 	for (bpp = fxp_q4_to_int(limits->link.max_bpp_x16);
 	     bpp >= fxp_q4_to_int(limits->link.min_bpp_x16);
 	     bpp -= 2 * 3) {
 		int link_bpp = intel_dp_output_bpp(pipe_config->output_format, bpp);
 
-		mode_rate = intel_dp_link_required(clock, link_bpp);
+		for(clock = intel_dp_mode_clock(pipe_config, conn_state);
+		    clock >= adjusted_mode->clock;
+		    clock = intel_dp_mode_max_clock_in_range(conn_state, clock, adjusted_mode->clock)) {
 
-		for (i = 0; i < intel_dp->num_common_rates; i++) {
-			link_rate = intel_dp_common_rate(intel_dp, i);
-			if (link_rate < limits->min_rate ||
-			    link_rate > limits->max_rate)
-				continue;
+			mode_rate = intel_dp_link_required(clock, link_bpp);
+			for (i = 0; i < intel_dp->num_common_rates; i++) {
+				link_rate = intel_dp_common_rate(intel_dp, i);
+				if (link_rate < limits->min_rate ||
+					link_rate > limits->max_rate)
+					continue;
 
-			for (lane_count = limits->min_lane_count;
-			     lane_count <= limits->max_lane_count;
-			     lane_count <<= 1) {
-				link_avail = intel_dp_max_link_data_rate(intel_dp,
-									 link_rate,
-									 lane_count);
+				for (lane_count = limits->min_lane_count;
+				     lane_count <= limits->max_lane_count;
+				     lane_count <<= 1) {
+					link_avail = intel_dp_max_link_data_rate(intel_dp,
+							link_rate,
+							lane_count);
 
 
-				if (mode_rate <= link_avail) {
-					pipe_config->lane_count = lane_count;
-					pipe_config->pipe_bpp = bpp;
-					pipe_config->port_clock = link_rate;
+					if (mode_rate <= link_avail) {
+						pipe_config->lane_count = lane_count;
+						pipe_config->pipe_bpp = bpp;
+						pipe_config->port_clock = link_rate;
 
-					return 0;
+						return 0;
+					}
 				}
 			}
+			if(!has_seamless_m_n(connector))
+				break;
+			clock--;
 		}
 	}
-
 	return -EINVAL;
 }
 
