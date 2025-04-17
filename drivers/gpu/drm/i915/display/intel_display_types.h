@@ -966,7 +966,7 @@ struct intel_crtc_state {
 	 * mode on the transcoder, which spans all pipes.
 	 */
 	struct {
-		bool active, enable;
+		bool active, enable, enable_3dlut;
 		/* logical state of LUTs */
 		struct drm_property_blob *degamma_lut, *gamma_lut, *ctm;
 		struct drm_display_mode mode, pipe_mode, adjusted_mode;

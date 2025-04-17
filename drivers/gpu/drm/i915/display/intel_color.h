@@ -18,6 +18,7 @@ struct drm_plane;
 struct drm_plane_state;
 struct drm_prop_enum_list;
 enum intel_color_block;
+enum pipe;
 
 #define MAX_COLOR_PIPELINES 5
 
@@ -46,8 +47,8 @@ bool intel_color_lut_equal(const struct intel_crtc_state *crtc_state,
 void intel_color_assert_luts(const struct intel_crtc_state *crtc_state);
 struct intel_plane_colorop *intel_colorop_alloc(void);
 struct intel_plane_colorop *intel_plane_colorop_create(enum intel_color_block id);
-int intel_plane_tf_pipeline_init(struct drm_plane *plane, struct drm_prop_enum_list *list);
-int intel_plane_color_init(struct drm_plane *plane);
+int intel_plane_tf_pipeline_init(struct drm_plane *plane, struct drm_prop_enum_list *list, enum pipe pipe);
+int intel_plane_color_init(struct drm_plane *plane, enum pipe pipe);
 void intel_program_pipeline(const struct drm_plane_state *plane_state,
 			    u32 *plane_color_ctl);
 void intel_color_load_plane_csc_matrix(const struct drm_plane_state *plane_state,

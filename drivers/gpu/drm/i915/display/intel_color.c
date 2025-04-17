@@ -1142,10 +1142,8 @@ static void skl_color_commit_arm(struct intel_dsb *dsb,
 }
 
 /* TODO: change to struct intel_display*/
-static bool intel_crtc_has_lut_3d(struct intel_crtc *crtc)
+static bool intel_crtc_has_lut_3d(struct intel_display *display, enum pipe pipe)
 {
-        struct intel_display *display = to_intel_display(crtc);
-        enum pipe pipe = crtc->pipe;
         if (DISPLAY_VER(display) >= 12)
                 return pipe == PIPE_A || pipe == PIPE_B;
         else if (DISPLAY_VER(display) >= 10 /*|| IS_GEMINILAKE(display)*/)
@@ -1162,10 +1160,12 @@ static void glk_lut_3d_commit(const struct intel_crtc_state *crtc_state)
 	u32 val;
 
 	WARN_ON(intel_de_read(display, LUT_3D_CTL(pipe)) & LUT_3D_READY);
+
+	pr_alert("Exodus glk_lut_3d_commit %d", crtc_state->hw.enable_3dlut);
 	/* Enable by default */
-	if(1)
+	if(crtc_state->hw.enable_3dlut)
 	/* if (crtc_state->hw.gamma_lut_3d) */
-		val = LUT_3D_ENABLE | LUT_3D_READY;
+		val = LUT_3D_ENABLE | LUT_3D_READY /*| LUT_3D_BIND_PLANE_1*/;
 	else
 		val = 0;
 	intel_de_write(display, LUT_3D_CTL(pipe), val);
@@ -1178,7 +1178,7 @@ static void icl_color_commit_arm(struct intel_dsb *dsb,
 	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
 	enum pipe pipe = crtc->pipe;
 
-	if (intel_crtc_has_lut_3d(crtc))
+	if (intel_crtc_has_lut_3d(display, pipe))
 		glk_lut_3d_commit(crtc_state);
 	
 	/*
@@ -4466,16 +4466,45 @@ struct intel_plane_colorop *intel_plane_colorop_create(enum intel_color_block id
 static void glk_load_lut_3d(struct intel_crtc *crtc,
 			    const struct drm_property_blob *blob)
 {
-	struct intel_display *intel_display = to_intel_display(crtc->base.dev);
+	struct intel_display *display = to_intel_display(crtc->base.dev);
 	const struct drm_color_lut *lut = blob->data;
 	int i, lut_size = drm_color_lut_size(blob);
 	enum pipe pipe = crtc->pipe;
+	
+	
+	pr_alert("Exodus: glk_load_lut_3d %d\n", lut_size);
 
-	WARN_ON(intel_de_read(dev_priv, LUT_3D_CTL(pipe)) & LUT_3D_READY);
-	intel_de_write(dev_priv, LUT_3D_INDEX(pipe), LUT_3D_AUTO_INCREMENT);
-	for (i = 0; i < lut_size; i++)
-		intel_de_write(dev_priv, LUT_3D_DATA(pipe), ilk_lut_10(&lut[i]));
-	intel_de_write(dev_priv, LUT_3D_INDEX(pipe), 0);
+	WARN_ON(intel_de_read(display, LUT_3D_CTL(pipe)) & LUT_3D_READY);
+	intel_de_write(display, LUT_3D_INDEX(pipe), LUT_3D_AUTO_INCREMENT);
+	for (i = 0; i < lut_size; i++) {
+		intel_de_write(display, LUT_3D_DATA(pipe), ilk_lut_10(&lut[i]));
+                pr_alert("w val %x 3DLUT[%d] r = %x g = %x b = %x", ilk_lut_10(&lut[i]), i, lut[i].red, lut[i].green, lut[i].blue);
+	}
+	intel_de_write(display, LUT_3D_INDEX(pipe), 0);
+
+#if 1
+	int val;
+
+	intel_de_write(display, LUT_3D_INDEX(pipe), LUT_3D_AUTO_INCREMENT);
+	for (i = 0; i < lut_size; i++) {
+		val = intel_de_read(display, LUT_3D_DATA(pipe));
+		pr_alert("r val %x 3DLUT[%d] r = %x g = %x b = %x", val, i, val >> 20 ,(val >> 10) & 0x3ff, val & 0x3ff);
+	}
+	intel_de_write(display, LUT_3D_INDEX(pipe), 0);
+#endif
+}
+
+static void bypass_colorop(const struct drm_plane_state *plane_state,
+			  struct drm_colorop *colorop)
+{
+	struct intel_crtc *crtc = to_intel_crtc(plane_state->crtc);
+	//struct intel_crtc_state *pipe_config = crtc->config;
+	struct intel_display *display = to_intel_display(crtc);
+	enum pipe pipe = crtc->pipe;
+
+	if (colorop->type == DRM_COLOROP_3D_LUT)
+		intel_de_write(display, LUT_3D_CTL(pipe), 0);
+//		pipe_config->hw.enable_3dlut = false;
 }
 
 static void apply_colorop(const struct drm_plane_state *plane_state,
@@ -4484,6 +4513,12 @@ static void apply_colorop(const struct drm_plane_state *plane_state,
 {
 	struct drm_colorop_state *state = colorop->state;
 	struct intel_plane_colorop *intel_colorop = to_intel_plane_colorop(colorop);
+	struct intel_crtc *crtc = to_intel_crtc(plane_state->crtc);
+	struct intel_crtc_state *pipe_config = crtc->config;
+	enum pipe pipe = crtc->pipe;
+	struct intel_display *display = to_intel_display(crtc);
+
+	pr_alert("Exodus: Setting color op type %d", colorop->type);
 
 	if (colorop->type == DRM_COLOROP_CTM_3X3) {
 		/* TODO: use intel_color_op state data */
@@ -4499,7 +4534,13 @@ static void apply_colorop(const struct drm_plane_state *plane_state,
 			intel_color_load_plane_luts(plane_state, state->data, false);
 		}
 	} else if (colorop->type == DRM_COLOROP_3D_LUT) {
-		glk_load_lut_3d(to_intel_crtc(plane_state->crtc), state->data);		
+		pr_alert("Exodus: setting 3D LUT");
+		pipe_config->hw.enable_3dlut = true;
+		/* Force color management change */
+		pipe_config->uapi.color_mgmt_changed = true;
+		glk_load_lut_3d(crtc, state->data);	
+
+		intel_de_write(display, LUT_3D_CTL(pipe), LUT_3D_ENABLE | LUT_3D_READY);
 	}
 }
 
@@ -4523,17 +4564,20 @@ void intel_program_pipeline(const struct drm_plane_state *plane_state, u32 *plan
 
 		if (!colorop_state->bypass)
 			apply_colorop(plane_state, colorop, plane_color_ctl);
+		else
+			bypass_colorop(plane_state, colorop);
 
 		colorop = colorop->next;
 	}
 }
 
-int intel_plane_tf_pipeline_init(struct drm_plane *plane, struct drm_prop_enum_list *list)
+int intel_plane_tf_pipeline_init(struct drm_plane *plane, struct drm_prop_enum_list *list, enum pipe pipe)
 {
 	struct intel_plane_colorop *colorop;
 	struct drm_device *dev = plane->dev;
 	int ret;
 	struct drm_colorop *prev_op;
+	struct intel_display *display = to_intel_display(dev);
 
 	colorop = intel_plane_colorop_create(CB_PLANE_PRE_CSC_LUT);
 
@@ -4558,8 +4602,8 @@ int intel_plane_tf_pipeline_init(struct drm_plane *plane, struct drm_prop_enum_l
 
 	prev_op = &colorop->base;
 
-	if (intel_crtc_has_lut_3d(to_intel_crtc(plane_state->crtc) && 
-	    plane->type == DRM_PLANE_TYPE_PRIMARY)) {
+	if (intel_crtc_has_lut_3d(display,pipe) && 
+	    plane->type == DRM_PLANE_TYPE_PRIMARY) {
 
 		colorop = intel_plane_colorop_create(CB_PLANE_3DLUT);
 
@@ -4586,7 +4630,7 @@ int intel_plane_tf_pipeline_init(struct drm_plane *plane, struct drm_prop_enum_l
 	return 0;
 }
 
-int intel_plane_color_init(struct drm_plane *plane)
+int intel_plane_color_init(struct drm_plane *plane, enum pipe pipe)
 {
 	struct drm_device *dev = plane->dev;
 	struct intel_display *display = to_intel_display(dev);
@@ -4605,7 +4649,7 @@ int intel_plane_color_init(struct drm_plane *plane)
 	len++;
 
 	/* Add pipeline consisting of transfer functions */
-	ret = intel_plane_tf_pipeline_init(plane, &pipelines[len]);
+	ret = intel_plane_tf_pipeline_init(plane, &pipelines[len], pipe);
 	if (ret)
 		return ret;
 	len++;
