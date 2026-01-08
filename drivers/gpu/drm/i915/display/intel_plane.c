@@ -887,6 +887,10 @@ void intel_plane_update_arm(struct intel_dsb *dsb,
 		return;
 	}
 
+	/* Front Plane is already flipped along with the Back Plane, So ingore arming */
+	if (crtc_state->do_async_flip && plane_state->is_front_plane)
+		return;
+
 	trace_intel_plane_update_arm(plane_state, crtc);
 	plane->update_arm(dsb, plane, crtc_state, plane_state);
 }
@@ -926,7 +930,7 @@ void intel_crtc_planes_update_noarm(struct intel_dsb *dsb,
 
 		/* TODO: for mailbox updates this should be skipped */
 		if (new_plane_state->uapi.visible ||
-		    new_plane_state->is_y_plane)
+		    new_plane_state->is_y_plane || new_plane_state->is_front_plane)
 			intel_plane_update_noarm(dsb, plane,
 						 new_crtc_state, new_plane_state);
 	}
@@ -959,7 +963,7 @@ static void skl_crtc_planes_update_arm(struct intel_dsb *dsb,
 		 * would have to be called here as well.
 		 */
 		if (new_plane_state->uapi.visible ||
-		    new_plane_state->is_y_plane)
+		    new_plane_state->is_y_plane || new_plane_state->is_front_plane)
 			intel_plane_update_arm(dsb, plane, new_crtc_state, new_plane_state);
 		else
 			intel_plane_disable_arm(dsb, plane, new_crtc_state);
@@ -1470,6 +1474,41 @@ void intel_plane_init_cursor_vblank_work(struct intel_plane_state *old_plane_sta
 			     intel_cursor_unpin_work);
 }
 
+
+static void link_planes(struct intel_crtc_state *crtc_state,
+			struct intel_plane_state *driver_plane_state,
+			struct intel_plane_state *linked_plane_state)
+{
+	struct intel_plane *driver_plane = to_intel_plane(driver_plane_state->uapi.plane);
+	struct intel_plane *linked_plane = to_intel_plane(linked_plane_state->uapi.plane);
+
+	crtc_state->enabled_planes |= BIT(linked_plane->id);
+	crtc_state->active_planes |= BIT(linked_plane->id);
+	crtc_state->update_planes |= BIT(linked_plane->id);
+
+	crtc_state->data_rate[linked_plane->id] = crtc_state->data_rate_y[driver_plane->id];
+	crtc_state->rel_data_rate[linked_plane->id] = crtc_state->rel_data_rate_y[driver_plane->id];
+
+	intel_plane_copy_hw_state(linked_plane_state, driver_plane_state);
+	linked_plane_state->uapi.src = driver_plane_state->uapi.src;
+	linked_plane_state->uapi.dst = driver_plane_state->uapi.dst;
+
+	linked_plane_state->ctl = driver_plane_state->ctl;
+	linked_plane_state->color_ctl = driver_plane_state->color_ctl;
+	linked_plane_state->view = driver_plane_state->view;
+	linked_plane_state->decrypt = driver_plane_state->decrypt;
+}
+
+static void disable_linked_plane(struct intel_crtc_state *crtc_state,
+				 struct intel_plane *linked_plane)
+{
+	crtc_state->enabled_planes &= ~BIT(linked_plane->id);
+	crtc_state->active_planes &= ~BIT(linked_plane->id);
+	crtc_state->update_planes |= BIT(linked_plane->id);
+	crtc_state->data_rate[linked_plane->id] = 0;
+	crtc_state->rel_data_rate[linked_plane->id] = 0;
+}
+
 static void link_nv12_planes(struct intel_crtc_state *crtc_state,
 			     struct intel_plane_state *uv_plane_state,
 			     struct intel_plane_state *y_plane_state)
@@ -1487,22 +1526,7 @@ static void link_nv12_planes(struct intel_crtc_state *crtc_state,
 	y_plane_state->is_y_plane = true;
 	y_plane_state->planar_linked_plane = uv_plane;
 
-	crtc_state->enabled_planes |= BIT(y_plane->id);
-	crtc_state->active_planes |= BIT(y_plane->id);
-	crtc_state->update_planes |= BIT(y_plane->id);
-
-	crtc_state->data_rate[y_plane->id] = crtc_state->data_rate_y[uv_plane->id];
-	crtc_state->rel_data_rate[y_plane->id] = crtc_state->rel_data_rate_y[uv_plane->id];
-
-	/* Copy parameters to Y plane */
-	intel_plane_copy_hw_state(y_plane_state, uv_plane_state);
-	y_plane_state->uapi.src = uv_plane_state->uapi.src;
-	y_plane_state->uapi.dst = uv_plane_state->uapi.dst;
-
-	y_plane_state->ctl = uv_plane_state->ctl;
-	y_plane_state->color_ctl = uv_plane_state->color_ctl;
-	y_plane_state->view = uv_plane_state->view;
-	y_plane_state->decrypt = uv_plane_state->decrypt;
+	link_planes(crtc_state, uv_plane_state, y_plane_state);
 
 	icl_link_nv12_planes(uv_plane_state, y_plane_state);
 }
@@ -1522,11 +1546,7 @@ static void unlink_nv12_plane(struct intel_crtc_state *crtc_state,
 
 	plane_state->is_y_plane = false;
 
-	crtc_state->enabled_planes &= ~BIT(plane->id);
-	crtc_state->active_planes &= ~BIT(plane->id);
-	crtc_state->update_planes |= BIT(plane->id);
-	crtc_state->data_rate[plane->id] = 0;
-	crtc_state->rel_data_rate[plane->id] = 0;
+	disable_linked_plane(crtc_state, plane);
 }
 
 static int icl_check_nv12_planes(struct intel_atomic_state *state,
@@ -1590,6 +1610,131 @@ static int icl_check_nv12_planes(struct intel_atomic_state *state,
 		}
 
 		link_nv12_planes(crtc_state, plane_state, y_plane_state);
+	}
+
+	return 0;
+}
+
+static void unlink_tr_plane(struct intel_crtc_state *crtc_state,
+			    struct intel_plane_state *plane_state)
+{
+	struct intel_display *display = to_intel_display(plane_state);
+	struct intel_plane *plane = to_intel_plane(plane_state->uapi.plane);
+
+	plane_state->tr_linked_plane = NULL;
+
+	if (!plane_state->is_front_plane)
+		return;
+
+	drm_WARN_ON(display->drm, plane_state->uapi.visible);
+
+	plane_state->is_front_plane = false;
+
+	disable_linked_plane(crtc_state, plane);
+}
+
+static int gen13_check_tr_planes(struct intel_crtc_state *crtc_state)
+{
+	struct intel_display *display = to_intel_display(crtc_state);
+	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
+	struct intel_atomic_state *state = to_intel_atomic_state(crtc_state->uapi.state);
+	struct intel_plane *plane, *back_plane, *front_plane;
+	struct intel_plane_state *plane_state, *back_plane_state;
+	int i;
+
+	if (DISPLAY_VER(display) < 13)
+		return 0;
+
+	if (!display->params.enable_tr)
+		return 0;
+	/*
+	 * Destroy all old plane links and make the slave plane invisible
+	 * in the crtc_state->active_planes mask.
+	 */
+	for_each_new_intel_plane_in_state(state, plane, plane_state, i) {
+		if (plane->pipe != crtc->pipe || !plane_state->tr_linked_plane)
+			continue;
+
+		if (plane_state->tr_linked_plane)
+			unlink_tr_plane(crtc_state, plane_state);
+	}
+
+	/*
+	 * Now that we have undone the links, do not proceed if for sync flips
+	 * TODO: Check if anything else needs to be undone
+	 */
+	if (!crtc_state->uapi.async_flip)
+		return 0;
+
+	if (crtc_state->nv12_planes)
+		return 0;
+
+	/* TODO: Add check if scalar is enabled */
+
+	for_each_new_intel_plane_in_state(state, back_plane, back_plane_state, i) {
+		struct intel_plane_state *front_plane_state = NULL;
+
+		/* FIXME: This logic depends on the semantics that right now Async Flip is done only on Primary Plane */
+		if (back_plane->pipe != crtc->pipe ||
+				back_plane->id != PLANE_PRIMARY)
+			continue;
+
+		for_each_intel_plane_on_crtc(display->drm, crtc, front_plane) {
+			if (front_plane->id != back_plane->id + 1)
+				continue;
+
+			/* Exodus: probably we can do an early exit*/
+			if (crtc_state->active_planes & BIT(front_plane->id))
+				continue;
+
+			/* This is where linked slave plane state is getting added */
+			front_plane_state = intel_atomic_get_plane_state(state, front_plane);
+			if (IS_ERR(front_plane_state))
+				return PTR_ERR(front_plane_state);
+
+			break;
+		}
+
+		if (!front_plane_state) {
+			drm_dbg_kms(display->drm,
+					"Plane adjacent to %s not available for Tear Reduction\n",
+					back_plane->base.name);
+
+			return -EINVAL;
+		}
+
+		back_plane_state->tr_linked_plane = front_plane;
+		front_plane_state->tr_linked_plane = back_plane;
+		front_plane_state->is_front_plane = true;
+
+		link_planes(crtc_state, back_plane_state, front_plane_state);
+
+		gen13_link_tr_planes(back_plane_state, front_plane_state);
+	}
+
+	return 0;
+}
+
+static int gen13_add_tr_linked_planes(struct intel_atomic_state *state)
+{
+	struct intel_plane *plane, *linked;
+	struct intel_plane_state *plane_state, *linked_plane_state;
+	int i;
+
+	for_each_new_intel_plane_in_state(state, plane, plane_state, i) {
+		linked = plane_state->tr_linked_plane;
+
+		if (!linked)
+			continue;
+
+		linked_plane_state = intel_atomic_get_plane_state(state, linked);
+		if (IS_ERR(linked_plane_state))
+			return PTR_ERR(linked_plane_state);
+
+		drm_WARN_ON(state->base.dev,
+				linked_plane_state->tr_linked_plane != plane);
+		drm_WARN_ON(state->base.dev,
+				linked_plane_state->is_front_plane == plane_state->is_front_plane);
 	}
 
 	return 0;
@@ -1724,6 +1869,16 @@ int intel_plane_atomic_check(struct intel_atomic_state *state)
 	if (ret)
 		return ret;
 
+	/*
+	 * Exodus: Joiner and async flip cases are perhaps mutually exclusive
+	 * So at the right abstraction layer we should perhaps use respective
+	 * function to add the planes
+	 */
+	ret = gen13_add_tr_linked_planes(state);
+	if (ret) {
+		return ret;
+	}
+
 	for_each_new_intel_plane_in_state(state, plane, plane_state, i) {
 		ret = plane_atomic_check(state, plane);
 		if (ret) {
@@ -1741,7 +1896,11 @@ int intel_plane_atomic_check(struct intel_atomic_state *state)
 		ret = icl_check_nv12_planes(state, crtc);
 		if (ret)
 			return ret;
-
+		ret = gen13_check_tr_planes(new_crtc_state);
+		if (ret) {
+			pr_alert("Exodus: icl_check_tr_planes returns %d", ret);
+			return ret;
+		}
 		/*
 		 * On some platforms the number of active planes affects
 		 * the planes' minimum cdclk calculation. Add such planes

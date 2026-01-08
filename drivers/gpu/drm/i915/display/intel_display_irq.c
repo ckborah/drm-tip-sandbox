@@ -1371,7 +1371,7 @@ static void gen11_dsi_te_interrupt_handler(struct intel_display *display,
 static u32 gen8_de_pipe_flip_done_mask(struct intel_display *display)
 {
 	if (DISPLAY_VER(display) >= 9)
-		return GEN9_PIPE_PLANE1_FLIP_DONE;
+		return GEN9_PIPE_PLANE1_FLIP_DONE | GEN9_PIPE_PLANE2_FLIP_DONE;
 	else
 		return GEN8_PIPE_PRIMARY_FLIP_DONE;
 }

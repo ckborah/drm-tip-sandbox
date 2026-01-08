@@ -2127,6 +2127,10 @@ static int icl_build_plane_wm(struct intel_crtc_state *crtc_state,
 	if (plane_state->is_y_plane)
 		return 0;
 
+	/* Watermarks calculated in Back Plane */
+	if (plane_state->is_front_plane)
+		return 0;
+
 	memset(wm, 0, sizeof(*wm));
 
 	if (plane_state->planar_linked_plane) {
@@ -2146,6 +2150,21 @@ static int icl_build_plane_wm(struct intel_crtc_state *crtc_state,
 						plane, 1);
 		if (ret)
 			return ret;
+	} else if(plane_state->tr_linked_plane) {
+		/* TODO: pass front_plane state */
+		ret = skl_build_plane_wm_single(crtc_state, plane_state,
+				plane_state->tr_linked_plane, 0);
+		if (ret) {
+			pr_alert("Exodus: skl_build_plane_wm_single %d for plane %s", ret, plane->base.name);
+			return ret;
+		}
+
+		ret = skl_build_plane_wm_single(crtc_state, plane_state,
+				plane, 0);
+		if (ret) {
+			pr_alert("Exodus: skl_build_plane_wm_single %d for plane %s", ret, plane->base.name);
+			return ret;
+		}
 	} else if (intel_wm_plane_visible(crtc_state, plane_state)) {
 		ret = skl_build_plane_wm_single(crtc_state, plane_state,
 						plane, 0);

@@ -1705,6 +1705,44 @@ static void skl_plane_capture_error(struct intel_crtc *crtc,
 }
 
 static void
+gen13_front_plane_async_flip(struct intel_dsb *dsb, const struct intel_crtc_state *crtc_state,
+			     const struct intel_plane_state *back_plane_state)
+{
+	struct intel_display *display = to_intel_display(back_plane_state);
+	struct intel_plane *front_plane;
+	struct intel_plane_state *front_plane_state;
+	enum pipe pipe;
+	u32 plane_ctl, plane_surf;
+
+	front_plane = back_plane_state->tr_linked_plane;
+
+	drm_WARN_ON(display->drm, !front_plane);
+
+	front_plane_state = front_plane ? to_intel_plane_state(front_plane->base.state) : NULL;
+
+	drm_WARN_ON(display->drm, !front_plane_state);
+
+	if (!front_plane_state)
+		return;
+
+	plane_ctl = front_plane_state->ctl | skl_plane_ctl_crtc(crtc_state);
+	plane_surf = front_plane_state->surf;
+	pipe = front_plane->pipe;
+
+	if (DISPLAY_VER(display) >= 30)
+		plane_surf |= PLANE_SURF_ASYNC_UPDATE;
+	else
+		plane_ctl |= PLANE_CTL_ASYNC_FLIP;
+
+	if (front_plane_state) {
+		/* Add WARN_ONs */
+		intel_de_write_dsb(display, dsb, PLANE_CTL(pipe, front_plane->id), plane_ctl);
+		intel_de_write_dsb(display, dsb, PLANE_SURF(pipe, front_plane->id),
+				   plane_surf);
+	}
+}
+
+static void
 skl_plane_async_flip(struct intel_dsb *dsb,
 		     struct intel_plane *plane,
 		     const struct intel_crtc_state *crtc_state,
@@ -1726,8 +1764,22 @@ skl_plane_async_flip(struct intel_dsb *dsb,
 			plane_ctl |= PLANE_CTL_ASYNC_FLIP;
 	}
 
+	/*
+	 * Plane Surface for front plane should be updated with back plane
+	 * TODO: This assumes that the all the registers written before this
+	 *       are not self-arming. If that is not true we have to avoid writing
+	 *       the above registers too for front plane
+	 */
+	if (plane_state->is_front_plane)
+		return;
+
 	intel_de_write_dsb(display, dsb, PLANE_CTL(pipe, plane_id),
 			   plane_ctl);
+
+	/* Update Plane Surface of front plane just before Back Plane update */
+	if (plane_state->tr_linked_plane)
+		gen13_front_plane_async_flip(dsb, crtc_state, plane_state);
+
 	intel_de_write_dsb(display, dsb, PLANE_SURF(pipe, plane_id),
 			   plane_surf);
 }
@@ -2453,6 +2505,48 @@ void icl_link_nv12_planes(struct intel_plane_state *uv_plane_state,
 			MISSING_CASE(y_plane->id);
 		}
 	}
+}
+
+static u32 get_tr_step_size(struct intel_display *display)
+{
+	switch (display->params.enable_tr) {
+	case 1:
+		return PLANE_COLOR_SS_STEP_SIZE_1;
+	case 2:
+		return PLANE_COLOR_SS_STEP_SIZE_2;
+	case 3:
+		return PLANE_COLOR_SS_STEP_SIZE_4;
+	case 4:
+		return PLANE_COLOR_SS_STEP_SIZE_8;
+	case 5:
+		return PLANE_COLOR_SS_STEP_SIZE_16;
+	default:
+		return PLANE_COLOR_SS_STEP_SIZE_2;
+	}
+}
+
+void gen13_link_tr_planes(struct intel_plane_state *back_plane_state,
+		    struct intel_plane_state *front_plane_state)
+{
+	struct intel_display *display = to_intel_display(back_plane_state);
+	struct intel_plane *front_plane = to_intel_plane(front_plane_state->uapi.plane);
+	struct intel_plane *back_plane = to_intel_plane(back_plane_state->uapi.plane);
+	u32 step_size = get_tr_step_size(display);
+
+	drm_dbg_kms(display->drm, "Using [PLANE:%d:%s] as Front Plane for [PLANE:%d:%s] Back Plane\n",
+		    front_plane->base.base.id, front_plane->base.name,
+		    back_plane->base.base.id, back_plane->base.name);
+
+	/* TODO: add check for back_plane == front_plane + 1, also back plane should be primary*/
+
+	back_plane_state->color_ctl |= step_size; /* FIXME: Step Size hard coded to 16 BSpec: 53604 TODO: Find out if this needs to be set in both FP and BP*/
+	front_plane_state->color_ctl |= step_size; /* Windows sets it on both*/
+
+	front_plane->enable_flip_done = back_plane->enable_flip_done;
+	front_plane->disable_flip_done = back_plane->disable_flip_done;
+
+	/* Smooth Sync Bit needs to be set only on the back plane */
+	back_plane_state->ctl |= PLANE_CTL_SMOOTH_SYNC_ENABLE; /* FIXME: Add macro for SMOOTH SYNC bit*/
 }
 
 static struct intel_fbc *skl_plane_fbc(struct intel_display *display,

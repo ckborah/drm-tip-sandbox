@@ -752,6 +752,10 @@ struct intel_plane_state {
 	const char *no_fbc_reason;
 
 	struct drm_rect damage;
+
+	struct intel_plane *tr_linked_plane;
+
+	bool is_front_plane;
 };
 
 struct intel_initial_plane_config {

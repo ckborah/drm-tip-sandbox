@@ -37,6 +37,10 @@ void icl_link_nv12_planes(struct intel_plane_state *uv_plane_state,
 
 bool icl_is_nv12_y_plane(struct intel_display *display,
 			 enum plane_id plane_id);
+
+void gen13_link_tr_planes(struct intel_plane_state *back_plane_state,
+		    struct intel_plane_state *front_plane_state);
+
 u8 icl_hdr_plane_mask(void);
 bool icl_is_hdr_plane(struct intel_display *display, enum plane_id plane_id);
 

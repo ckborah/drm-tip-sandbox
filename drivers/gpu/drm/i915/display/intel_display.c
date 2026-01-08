@@ -1110,7 +1110,8 @@ static void intel_crtc_enable_flip_done(struct intel_atomic_state *state,
 
 	for_each_new_intel_plane_in_state(state, plane, plane_state, i) {
 		if (plane->pipe == crtc->pipe &&
-		    update_planes & BIT(plane->id))
+		    update_planes & BIT(plane->id) &&
+		    !(plane_state->tr_linked_plane && !plane_state->is_front_plane)) /* Do not enable flip done for Back Plane */
 			plane->enable_flip_done(plane);
 	}
 }
@@ -6130,7 +6131,12 @@ static int intel_async_flip_check_hw(struct intel_atomic_state *state, struct in
 		return -EINVAL;
 	}
 
-	if (old_crtc_state->active_planes != new_crtc_state->active_planes) {
+	/*
+	 * With Tear Reduction enabled, number of active plane will vary in
+	 * old and new crtc state.
+	 */
+	if (!display->params.enable_tr &&
+	    old_crtc_state->active_planes != new_crtc_state->active_planes) {
 		drm_dbg_kms(display->drm,
 			    "[CRTC:%d:%s] Active planes cannot be in async flip\n",
 			    crtc->base.base.id, crtc->base.name);
@@ -6140,6 +6146,13 @@ static int intel_async_flip_check_hw(struct intel_atomic_state *state, struct in
 	for_each_oldnew_intel_plane_in_state(state, plane, old_plane_state,
 					     new_plane_state, i) {
 		if (plane->pipe != crtc->pipe)
+			continue;
+
+		/*
+		 * Since front plane mirrors all properties of back plane.
+		 * Checking only back plane's properties should be enough.
+		 */
+		if (new_plane_state->tr_linked_plane && new_plane_state->is_front_plane)
 			continue;
 
 		/*
