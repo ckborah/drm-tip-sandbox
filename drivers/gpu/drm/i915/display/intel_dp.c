@@ -2682,7 +2682,8 @@ intel_dp_compute_config_limits(struct intel_dp *intel_dp,
 	limits->min_lane_count = intel_dp_min_lane_count(intel_dp);
 	limits->max_lane_count = intel_dp_max_lane_count(intel_dp);
 
-	limits->pipe.min_bpp = intel_dp_in_hdr_mode(conn_state) ? 30 :
+	limits->pipe.min_bpp = (intel_dp_in_hdr_mode(conn_state) &&
+				intel_dp_supports_dsc(intel_dp, connector, crtc_state)) ? 30 :
 				intel_dp_min_bpp(crtc_state->output_format);
 	if (is_mst) {
 		/*
