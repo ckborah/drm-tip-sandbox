@@ -2778,6 +2778,17 @@ bool intel_dp_joiner_needs_dsc(struct intel_display *display,
 		num_joined_pipes == 4;
 }
 
+static bool intel_dp_hdr_dsc_fallback(struct intel_dp *intel_dp,
+				      struct intel_crtc_state *pipe_config,
+				      struct drm_connector_state *conn_state)
+{
+	struct intel_connector *connector =
+		to_intel_connector(conn_state->connector);
+
+	return (pipe_config->pipe_bpp < 30) && intel_dp_in_hdr_mode(conn_state) &&
+		intel_dp_supports_dsc(intel_dp, connector, pipe_config);
+}
+
 static int
 intel_dp_compute_link_for_joined_pipes(struct intel_encoder *encoder,
 				       struct intel_crtc_state *pipe_config,
@@ -2793,6 +2804,7 @@ intel_dp_compute_link_for_joined_pipes(struct intel_encoder *encoder,
 	struct intel_dp *intel_dp = enc_to_intel_dp(encoder);
 	struct link_config_limits limits;
 	bool dsc_needed, joiner_needs_dsc;
+	bool hdr_dsc_fallback = false;
 	int ret = 0;
 
 	joiner_needs_dsc = intel_dp_joiner_needs_dsc(display, num_joined_pipes);
@@ -2810,7 +2822,10 @@ intel_dp_compute_link_for_joined_pipes(struct intel_encoder *encoder,
 		 */
 		ret = intel_dp_compute_link_config_wide(intel_dp, pipe_config,
 							conn_state, &limits);
-		if (!ret && intel_dp_is_uhbr(pipe_config))
+
+		hdr_dsc_fallback = intel_dp_hdr_dsc_fallback(intel_dp, pipe_config, conn_state);
+
+		if (!ret && intel_dp_is_uhbr(pipe_config) && !hdr_dsc_fallback)
 			ret = intel_dp_mtp_tu_compute_config(intel_dp,
 							     pipe_config,
 							     conn_state,
@@ -2818,7 +2833,7 @@ intel_dp_compute_link_for_joined_pipes(struct intel_encoder *encoder,
 							     fxp_q4_from_int(pipe_config->pipe_bpp),
 							     0, false);
 
-		if (ret ||
+		if (ret || hdr_dsc_fallback ||
 		    !intel_dp_dotclk_valid(display,
 					   adjusted_mode->crtc_clock,
 					   adjusted_mode->crtc_htotal,
@@ -2837,7 +2852,7 @@ intel_dp_compute_link_for_joined_pipes(struct intel_encoder *encoder,
 
 		drm_dbg_kms(display->drm,
 			    "Try DSC (fallback=%s, joiner=%s, force=%s)\n",
-			    str_yes_no(ret), str_yes_no(joiner_needs_dsc),
+			    str_yes_no(ret || hdr_dsc_fallback), str_yes_no(joiner_needs_dsc),
 			    str_yes_no(intel_dp->force_dsc_en));
 
 		if (!intel_dp_compute_config_limits(intel_dp, conn_state, pipe_config,
