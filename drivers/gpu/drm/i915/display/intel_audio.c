@@ -1213,6 +1213,24 @@ static int intel_audio_component_sync_audio_rate(struct device *kdev, int port,
 	return err;
 }
 
+static void prune_sad(const u8 *eld)
+{
+	u8 *sad = (u8 *)drm_eld_sad(eld);
+	int i;
+	u8 max_channel = 2;
+
+	for (i = 0; i < drm_eld_sad_count(eld); i++, sad += 3) {
+		/* if format is LPCM */
+		if (((sad[0] & 0x78) >> 3) == 0x1) {
+			pr_alert("SAD[%d] %x %x %x limited to %d channels", i, sad[0], sad[1], sad[2], max_channel);
+			sad[0] = (sad[0] & ~0x07) | ((max_channel & 0x07) - 1);
+		} else {/* Prune everything else */
+			pr_alert("SAD[%d] %x %x %x pruned", i, sad[0], sad[1], sad[2]);
+			memset(&sad[0], 0, 3);
+		}
+	}
+}
+
 static int intel_audio_component_get_eld(struct device *kdev, int port,
 					 int cpu_transcoder, bool *enabled,
 					 unsigned char *buf, int max_bytes)
@@ -1236,6 +1254,7 @@ static int intel_audio_component_get_eld(struct device *kdev, int port,
 		const u8 *eld = audio_state->eld;
 
 		ret = drm_eld_size(eld);
+		prune_sad(eld);
 		memcpy(buf, eld, min(max_bytes, ret));
 	}
 
