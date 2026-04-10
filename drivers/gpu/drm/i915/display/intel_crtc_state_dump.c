@@ -204,6 +204,9 @@ void intel_crtc_state_dump(const struct intel_crtc_state *pipe_config,
 		   intel_output_format_name(pipe_config->output_format),
 		   intel_output_format_name(pipe_config->sink_format));
 
+	drm_printf(&p, "limited color range: %s\n",
+		   str_yes_no(pipe_config->limited_color_range));
+
 	drm_printf(&p, "cpu_transcoder: %s, pipe bpp: %i, dithering: %i\n",
 		   transcoder_name(pipe_config->cpu_transcoder),
 		   pipe_config->pipe_bpp, pipe_config->dither);

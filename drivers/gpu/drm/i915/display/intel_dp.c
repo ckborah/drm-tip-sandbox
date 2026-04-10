@@ -3127,8 +3127,16 @@ static void intel_dp_compute_vsc_colorimetry(const struct intel_crtc_state *crtc
 	drm_WARN_ON(display->drm,
 		    vsc->bpc == 6 && vsc->pixelformat != DP_PIXELFORMAT_RGB);
 
-	/* all YCbCr are always limited range */
-	vsc->dynamic_range = DP_DYNAMIC_RANGE_CTA;
+	/*
+	 * YCbCr formats are always limited (CTA) range. For RGB, reflect
+	 * the actual color range being sent so sinks use the correct
+	 * quantization when VSC SDP indicates colorimetry format.
+	 */
+	if (vsc->pixelformat == DP_PIXELFORMAT_RGB)
+		vsc->dynamic_range = crtc_state->limited_color_range ?
+			DP_DYNAMIC_RANGE_CTA : DP_DYNAMIC_RANGE_VESA;
+	else
+		vsc->dynamic_range = DP_DYNAMIC_RANGE_CTA;
 	vsc->content_type = DP_CONTENT_TYPE_NOT_DEFINED;
 }
 

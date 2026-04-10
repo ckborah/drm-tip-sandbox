@@ -475,6 +475,11 @@ void intel_ddi_set_dp_msa(const struct intel_crtc_state *crtc_state,
 
 	intel_de_write(display, TRANS_MSA_MISC(display, cpu_transcoder),
 		       temp);
+
+	drm_dbg_kms(display->drm,
+		    "MSA MISC: limited_color_range=%s (CEA_RGB=%s)\n",
+		    str_yes_no(crtc_state->limited_color_range),
+		    str_yes_no(!!(temp & DP_MSA_MISC_COLOR_CEA_RGB)));
 }
 
 static u32 bdw_trans_port_sync_master_select(enum transcoder master_transcoder)
