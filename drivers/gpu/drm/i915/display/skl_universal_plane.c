@@ -659,7 +659,7 @@ static u32 skl_plane_min_alignment(struct intel_plane *plane,
 
 /* Preoffset values for YUV to RGB Conversion */
 #define PREOFF_YUV_TO_RGB_HI		0x1800
-#define PREOFF_YUV_TO_RGB_ME		0x0000
+#define PREOFF_YUV_TO_RGB_ME		0x1F00
 #define PREOFF_YUV_TO_RGB_LO		0x1800
 
 #define  ROFF(x)          (((x) & 0xffff) << 16)
@@ -719,7 +719,52 @@ icl_program_input_csc(struct intel_dsb *dsb,
 			0x0, 0x7800, 0x7F10,
 		},
 	};
-	const u16 *csc = input_csc_matrix[plane_state->hw.color_encoding];
+
+	/* Matrix for Limited Range to Full Range Conversion */
+	static const u16 input_csc_matrix_lr[][9] = {
+		/*
+		 * BT.601 Limted range YCbCr -> full range RGB
+		 * The matrix required is :
+		 * [1.164384, 0.000, 1.596027,
+		 *  1.164384, -0.39175, -0.812813,
+		 *  1.164384, 2.017232, 0.0000]
+		 */
+		[DRM_COLOR_YCBCR_BT601] = {
+			0x7CC8, 0x7950, 0x0,
+			0x8D00, 0x7950, 0x9C88,
+			0x0, 0x7950, 0x6810,
+		},
+		/*
+		 * BT.709 Limited range YCbCr -> full range RGB
+		 * The matrix required is :
+		 * [1.164384, 0.000, 1.792741,
+		 *  1.164384, -0.213249, -0.532909,
+		 *  1.164384, 2.112402, 0.0000]
+		 */
+		[DRM_COLOR_YCBCR_BT709] = {
+			0x7E58, 0x7950, 0x0,
+			0x8888, 0x7950, 0xADA8,
+			0x0, 0x7950,  0x6870,
+		},
+		/*
+		 * BT.2020 Limited range YCbCr -> full range RGB
+		 * The matrix required is :
+		 * [1.164, 0.000, 1.678,
+		 *  1.164, -0.1873, -0.6504,
+		 *  1.164, 2.1417, 0.0000]
+		 */
+		[DRM_COLOR_YCBCR_BT2020] = {
+			0x7D70, 0x7950, 0x0,
+			0x8A68, 0x7950, 0xAC00,
+			0x0, 0x7950, 0x6890,
+		},
+	};
+	const u16 *csc;
+
+	if (plane_state->hw.color_range == DRM_COLOR_YCBCR_FULL_RANGE)
+		csc = input_csc_matrix[plane_state->hw.color_encoding];
+	else
+		csc = input_csc_matrix_lr[plane_state->hw.color_encoding];
 
 	intel_de_write_dsb(display, dsb, PLANE_INPUT_CSC_COEFF(pipe, plane_id, 0),
 			   ROFF(csc[0]) | GOFF(csc[1]));
@@ -736,8 +781,16 @@ icl_program_input_csc(struct intel_dsb *dsb,
 
 	intel_de_write_dsb(display, dsb, PLANE_INPUT_CSC_PREOFF(pipe, plane_id, 0),
 			   PREOFF_YUV_TO_RGB_HI);
-	intel_de_write_dsb(display, dsb, PLANE_INPUT_CSC_PREOFF(pipe, plane_id, 1),
-			   PREOFF_YUV_TO_RGB_ME);
+
+	if (plane_state->hw.color_range == DRM_COLOR_YCBCR_FULL_RANGE)
+		intel_de_write_dsb(display, dsb,
+				   PLANE_INPUT_CSC_PREOFF(pipe, plane_id, 1),
+				   0);
+	else
+		intel_de_write_dsb(display, dsb,
+				   PLANE_INPUT_CSC_PREOFF(pipe, plane_id, 1),
+				   PREOFF_YUV_TO_RGB_ME);
+
 	intel_de_write_dsb(display, dsb, PLANE_INPUT_CSC_PREOFF(pipe, plane_id, 2),
 			   PREOFF_YUV_TO_RGB_LO);
 	intel_de_write_dsb(display, dsb,
@@ -1267,8 +1320,6 @@ static u32 glk_plane_color_ctl(const struct intel_plane_state *plane_state)
 			plane_color_ctl |= PLANE_COLOR_YUV_RANGE_CORRECTION_DISABLE;
 	} else if (fb->format->is_yuv) {
 		plane_color_ctl |= PLANE_COLOR_INPUT_CSC_ENABLE;
-		if (plane_state->hw.color_range == DRM_COLOR_YCBCR_FULL_RANGE)
-			plane_color_ctl |= PLANE_COLOR_YUV_RANGE_CORRECTION_DISABLE;
 	}
 
 	if (plane_state->force_black)
