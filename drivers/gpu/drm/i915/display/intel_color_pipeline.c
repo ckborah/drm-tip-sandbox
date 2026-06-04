@@ -14,7 +14,7 @@
 #define MAX_COLOR_PIPELINES 1
 #define MAX_COLOROP 4
 #define PLANE_DEGAMMA_SIZE 128
-#define PLANE_GAMMA_SIZE 32
+#define PLANE_GAMMA_SIZE 257
 
 static const struct drm_colorop_funcs intel_colorop_funcs = {
 	.destroy = intel_colorop_destroy,

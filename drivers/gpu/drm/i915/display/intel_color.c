@@ -4030,15 +4030,23 @@ xelpd_program_plane_post_csc_lut(struct intel_dsb *dsb,
 		intel_de_write_dsb(display, dsb, PLANE_POST_CSC_GAMC_SEG0_INDEX_ENH(pipe, plane, 0),
 				   PLANE_PAL_PREC_AUTO_INCREMENT);
 		if (post_csc_lut) {
-			lut_size = 32;
-			for (i = 0; i < lut_size; i++) {
+			/* Segment 0 */
+			for (i = 0; i < 9; i++) {
 				lut_val = drm_color_lut32_extract(post_csc_lut[i].green, 24);
+				intel_de_write_dsb(display, dsb,
+						   PLANE_POST_CSC_GAMC_SEG0_DATA_ENH(pipe, plane, 0),
+						   lut_val);
+			}
+
+			/* Segment 1 */
+			for (i = 0; i < 32; i++) {
+				lut_val = drm_color_lut32_extract(post_csc_lut[i * 8].green, 24);
 
 				intel_de_write_dsb(display, dsb,
 						   PLANE_POST_CSC_GAMC_DATA_ENH(pipe, plane, 0),
 						   lut_val);
 			}
-
+			lut_val = drm_color_lut32_extract(post_csc_lut[32 * 8].green, 24);
 			/* Segment 2 - clamp to the last LUT value to prevent step discontinuity */
 			do {
 				intel_de_write_dsb(display, dsb,
