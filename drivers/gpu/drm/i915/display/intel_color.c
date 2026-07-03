@@ -1938,9 +1938,26 @@ static void chv_load_luts(const struct intel_crtc_state *crtc_state)
 void intel_color_load_luts(const struct intel_crtc_state *crtc_state)
 {
 	struct intel_display *display = to_intel_display(crtc_state);
+	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
 
 	if (crtc_state->dsb_color)
 		return;
+
+	/* Log pipe gamma LUT values from userspace */
+	if (crtc_state->hw.gamma_lut) {
+		struct drm_color_lut *lut = crtc_state->hw.gamma_lut->data;
+		int lut_size = crtc_state->hw.gamma_lut->length / sizeof(*lut);
+		int i;
+
+		drm_dbg_kms(display->drm,
+			    "[Exodus] Pipe %c gamma LUT from userspace (size=%d):\n",
+			    pipe_name(crtc->pipe), lut_size);
+		for (i = 0; i < lut_size; i++)
+			drm_dbg_kms(display->drm,
+				    "[Exodus] Pipe %c gamma LUT[%d]: r=%u g=%u b=%u\n",
+				    pipe_name(crtc->pipe), i,
+				    lut[i].red, lut[i].green, lut[i].blue);
+	}
 
 	display->color.funcs->load_luts(crtc_state);
 }
@@ -3883,6 +3900,16 @@ xelpd_load_plane_csc_matrix(struct intel_dsb *dsb,
 	ctm = blob->data;
 	input = ctm->matrix;
 
+	drm_dbg_kms(display->drm,
+		    "[Exodus] Plane %d pipe %c pre-CSC CTM from userspace:\n"
+		    "[Exodus]   [%llx %llx %llx %llx]\n"
+		    "[Exodus]   [%llx %llx %llx %llx]\n"
+		    "[Exodus]   [%llx %llx %llx %llx]\n",
+		    plane, pipe_name(pipe),
+		    input[0], input[1], input[2], input[3],
+		    input[4], input[5], input[6], input[7],
+		    input[8], input[9], input[10], input[11]);
+
 	/*
 	 * Convert fixed point S31.32 input to format supported by the
 	 * hardware.
@@ -4011,6 +4038,17 @@ xelpd_program_plane_post_csc_lut(struct intel_dsb *dsb,
 
 	if (!icl_is_hdr_plane(display, plane))
 		return;
+
+	drm_dbg_kms(display->drm,
+		    "[Exodus] Plane %d pipe %c post-CSC LUT from userspace (size=%d):\n",
+		    plane, pipe_name(pipe), lut_size);
+	if (post_csc_lut) {
+		for (i = 0; i < lut_size; i++)
+			drm_dbg_kms(display->drm,
+				    "[Exodus]   LUT[%d]: r=%u g=%u b=%u\n",
+				    i, post_csc_lut[i].red, post_csc_lut[i].green,
+				    post_csc_lut[i].blue);
+	}
 
 	intel_de_write_dsb(display, dsb, PLANE_POST_CSC_GAMC_INDEX_ENH(pipe, plane, 0),
 			   PLANE_PAL_PREC_AUTO_INCREMENT);
