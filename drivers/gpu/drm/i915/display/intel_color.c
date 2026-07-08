@@ -1871,6 +1871,26 @@ static void icl_load_luts(const struct intel_crtc_state *crtc_state)
 	}
 }
 
+static void tgl_dump_lut(const struct intel_crtc_state *crtc_state,
+			 const struct drm_property_blob *blob,
+			 const char *name)
+{
+	struct intel_display *display = to_intel_display(crtc_state);
+	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
+	const struct drm_color_lut *lut = blob->data;
+	int i, lut_size = drm_color_lut_size(blob);
+
+	drm_dbg_kms(display->drm,
+		    "[CRTC:%d:%s] %s LUT (%d entries):\n",
+		    crtc->base.base.id, crtc->base.name, name, lut_size);
+
+	for (i = 0; i < lut_size; i++)
+		drm_dbg_kms(display->drm,
+			    "[CRTC:%d:%s] %s[%d]: R=0x%04x G=0x%04x B=0x%04x\n",
+			    crtc->base.base.id, crtc->base.name, name, i,
+			    lut[i].red, lut[i].green, lut[i].blue);
+}
+
 static void tgl_load_luts(const struct intel_crtc_state *crtc_state)
 {
 	const struct drm_property_blob *pre_csc_lut = crtc_state->pre_csc_lut;
@@ -1887,6 +1907,7 @@ static void tgl_load_luts(const struct intel_crtc_state *crtc_state)
 		const struct drm_color_lut *lut = post_csc_lut->data;
 		const struct drm_color_lut *last = &lut[256 * 8 * 128];
 
+		tgl_dump_lut(crtc_state, post_csc_lut, "gamma(12bit-multi-seg)");
 		icl_program_gamma_superfine_segment(crtc_state);
 		icl_program_gamma_multi_segment(crtc_state);
 		/* Clamp EXT/EXT2 GC MAX to last LUT value to prevent step discontinuity */
@@ -1899,6 +1920,7 @@ static void tgl_load_luts(const struct intel_crtc_state *crtc_state)
 		int lut_size = drm_color_lut_size(post_csc_lut);
 		const struct drm_color_lut *last = &lut[lut_size - 1];
 
+		tgl_dump_lut(crtc_state, post_csc_lut, "gamma(10bit)");
 		bdw_load_lut_10(crtc_state, post_csc_lut, PAL_PREC_INDEX_VALUE(0));
 		/* Clamp EXT/EXT2 GC MAX to last LUT value to prevent step discontinuity */
 		tgl_load_lut_ext_max(crtc_state, last);
