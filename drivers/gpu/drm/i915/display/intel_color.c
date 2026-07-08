@@ -1536,6 +1536,42 @@ static void glk_load_lut_ext2_max(const struct intel_crtc_state *crtc_state)
 	ilk_lut_write(crtc_state, PREC_PAL_EXT2_GC_MAX(pipe, 2), 1 << 16);
 }
 
+static void tgl_load_lut_ext_max(const struct intel_crtc_state *crtc_state,
+				  const struct drm_color_lut *color)
+{
+	struct intel_display *display = to_intel_display(crtc_state);
+	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
+	enum pipe pipe = crtc->pipe;
+
+	drm_dbg_kms(display->drm,
+		    "[CRTC:%d:%s] EXT GC MAX: R=0x%04x G=0x%04x B=0x%04x\n",
+		    crtc->base.base.id, crtc->base.name,
+		    color->red, color->green, color->blue);
+
+	/* Clamp to last LUT value to prevent step discontinuity */
+	ilk_lut_write(crtc_state, PREC_PAL_EXT_GC_MAX(pipe, 0), color->red);
+	ilk_lut_write(crtc_state, PREC_PAL_EXT_GC_MAX(pipe, 1), color->green);
+	ilk_lut_write(crtc_state, PREC_PAL_EXT_GC_MAX(pipe, 2), color->blue);
+}
+
+static void tgl_load_lut_ext2_max(const struct intel_crtc_state *crtc_state,
+				   const struct drm_color_lut *color)
+{
+	struct intel_display *display = to_intel_display(crtc_state);
+	struct intel_crtc *crtc = to_intel_crtc(crtc_state->uapi.crtc);
+	enum pipe pipe = crtc->pipe;
+
+	drm_dbg_kms(display->drm,
+		    "[CRTC:%d:%s] EXT2 GC MAX: R=0x%04x G=0x%04x B=0x%04x\n",
+		    crtc->base.base.id, crtc->base.name,
+		    color->red, color->green, color->blue);
+
+	/* Clamp to last LUT value to prevent step discontinuity */
+	ilk_lut_write(crtc_state, PREC_PAL_EXT2_GC_MAX(pipe, 0), color->red);
+	ilk_lut_write(crtc_state, PREC_PAL_EXT2_GC_MAX(pipe, 1), color->green);
+	ilk_lut_write(crtc_state, PREC_PAL_EXT2_GC_MAX(pipe, 2), color->blue);
+}
+
 static void ivb_load_luts(const struct intel_crtc_state *crtc_state)
 {
 	const struct drm_property_blob *post_csc_lut = crtc_state->post_csc_lut;
@@ -1829,6 +1865,46 @@ static void icl_load_luts(const struct intel_crtc_state *crtc_state)
 		ivb_load_lut_ext_max(crtc_state);
 		glk_load_lut_ext2_max(crtc_state);
 		break;
+	default:
+		MISSING_CASE(crtc_state->gamma_mode);
+		break;
+	}
+}
+
+static void tgl_load_luts(const struct intel_crtc_state *crtc_state)
+{
+	const struct drm_property_blob *pre_csc_lut = crtc_state->pre_csc_lut;
+	const struct drm_property_blob *post_csc_lut = crtc_state->post_csc_lut;
+
+	if (pre_csc_lut)
+		glk_load_degamma_lut(crtc_state, pre_csc_lut);
+
+	switch (crtc_state->gamma_mode & GAMMA_MODE_MODE_MASK) {
+	case GAMMA_MODE_MODE_8BIT:
+		ilk_load_lut_8(crtc_state, post_csc_lut);
+		break;
+	case GAMMA_MODE_MODE_12BIT_MULTI_SEG: {
+		const struct drm_color_lut *lut = post_csc_lut->data;
+		const struct drm_color_lut *last = &lut[256 * 8 * 128];
+
+		icl_program_gamma_superfine_segment(crtc_state);
+		icl_program_gamma_multi_segment(crtc_state);
+		/* Clamp EXT/EXT2 GC MAX to last LUT value to prevent step discontinuity */
+		tgl_load_lut_ext_max(crtc_state, last);
+		tgl_load_lut_ext2_max(crtc_state, last);
+		break;
+	}
+	case GAMMA_MODE_MODE_10BIT: {
+		const struct drm_color_lut *lut = post_csc_lut->data;
+		int lut_size = drm_color_lut_size(post_csc_lut);
+		const struct drm_color_lut *last = &lut[lut_size - 1];
+
+		bdw_load_lut_10(crtc_state, post_csc_lut, PAL_PREC_INDEX_VALUE(0));
+		/* Clamp EXT/EXT2 GC MAX to last LUT value to prevent step discontinuity */
+		tgl_load_lut_ext_max(crtc_state, last);
+		tgl_load_lut_ext2_max(crtc_state, last);
+		break;
+	}
 	default:
 		MISSING_CASE(crtc_state->gamma_mode);
 		break;
@@ -4138,7 +4214,7 @@ static const struct intel_color_funcs tgl_color_funcs = {
 	.color_check = icl_color_check,
 	.color_commit_noarm = icl_color_commit_noarm,
 	.color_commit_arm = icl_color_commit_arm,
-	.load_luts = icl_load_luts,
+	.load_luts = tgl_load_luts,
 	.read_luts = icl_read_luts,
 	.lut_equal = icl_lut_equal,
 	.read_csc = icl_read_csc,
